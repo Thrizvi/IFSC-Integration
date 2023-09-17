@@ -1,0 +1,142 @@
+(function execute(inputs, outputs) {
+    for (var i = 1; i < inputs.chunk; i++) {
+        var r = new sn_ws.RESTMessageV2('Recon_Satellite', 'Get all hosts'); // -------------History-----------
+        r.setMIDServer('Infra_automation'); // Get the Satellite data and insert them into Infra checklist table with only Gift - City New
+        r.setEccParameter('skip_sensor', true); // And  Gift - City DR Location only and insert them only 4 times with same name type of record
+        r.setStringParameter('page', i); // now if 5th time of same name type of record is coming then update that record with oldest record
+        var response = r.execute();
+
+        var responseBody = response.getBody(); //Get the data from Stellite
+        var httpStatus = response.getStatusCode();
+        gs.log("Recon_satellite HTTP Response" + httpStatus);
+        gs.log("Recon Satellite iteration: " + i);
+        createOrUpdateRecords(responseBody);
+    }
+
+    function createOrUpdateRecords(res) {
+        var ips = JSON.parse(res);
+        var ipsresults = ips.results;
+        ipsresults.forEach(function(e) {
+            var ogname = e.name; // Server name
+            var pkgcnt = e.content_facet_attributes.errata_counts.security; // count> 0 ? pending or complete
+
+            var patchstatus = pkgcnt > 0 ? "Pending" : "Completed";
+            var recondate = new GlideDateTime(); //get the system date
+
+
+            // Remove the garbage data which is coming from satellite and replace them with empty
+            ogname = ogname.replace(/\.nseroot\.com|\.nseroot\.co|\.nseroot\.c|nseroot\.|\.(nse|ns|nser|nsero|nseroo)\b/g, "").replace("virt-who-", "").replace("virt_who-", "");
+
+            // If server name contain  -  then do nothing else replace with them "_" on that particular index
+            if (ogname.includes('-')) {
+                var servergrinc = new GlideRecord('cmdb_ci_server');
+                servergrinc.addQuery('name', ogname);
+                servergrinc.addEncodedQuery('location=2b6ee90e1b77109020a10f26cc4bcb58^ORlocation=0be54af7878cad5894c5ea080cbb3586');
+                servergrinc.query();
+                if (servergrinc.next()) {
+                    ogname = ogname;
+                } else {
+                    var repogname = ogname.replace(/-/g, '_');
+
+                    ogname = repogname;
+                }
+            }
+            gs.log('My ogname ' + ogname);
+
+            function findSecondCell(k) {
+                if(k) {
+
+                    var SecondCell = k.split(' ');
+                    gs.log('split hua ' + SecondCell);
+
+                    if (SecondCell.length >= 3) {
+
+                        var secondCellValue = SecondCell[2];
+
+
+                        if (secondCellValue) {
+
+                            return secondCellValue;
+                        } else {
+                            gs.log('Nill');
+                        }
+                    }
+                }
+            }
+
+            var servergr = new GlideRecord('cmdb_ci_server');
+            servergr.addQuery('name', ogname);
+            servergr.addEncodedQuery('location=2b6ee90e1b77109020a10f26cc4bcb58^ORlocation=0be54af7878cad5894c5ea080cbb3586');
+            servergr.query();
+            if (servergr.next()) {
+
+                var g = new GlideRecord('u_infra_checklist');
+                g.addQuery('u_host_name', ogname);
+                g.orderBy('u_satellite_last_update');
+                g.query();
+
+                var cnt = g.getRowCount();
+                if (g.next()) {
+
+                    if (cnt < 4) {
+                        g.initialize();
+                        g.u_type = "Satellite";
+                        g.u_sub_type = "IFSC";
+                        g.u_host_name = ogname;
+                        g.u_package_count = pkgcnt;
+                        g.u_cia_value = servergr.u_cia_value;
+                        g.u_class = servergr.sys_class_name.getDisplayValue();
+                        g.location = servergr.location;
+                        g.u_patch_status = patchstatus;
+                        g.u_satellite_last_update = recondate;
+                        g.u_bigfix_last_update = recondate;
+                        g.u_satellite_integrated = true;
+                        g.u_kernel_version = findSecondCell(servergr.short_description);
+                        g.insert(); //Insertion
+                        gs.log("Recon_satellite Create: new mine" + ogname);
+                    } else {
+                        gs.log('for update mine too');
+
+
+
+                        g.u_type = "Satellite";
+                        g.u_sub_type = "IFSC";
+                        g.u_host_name = ogname;
+                        g.u_package_count = pkgcnt;
+                        g.u_cia_value = servergr.u_cia_value;
+                        g.u_class = servergr.sys_class_name.getDisplayValue();
+                        g.location = servergr.location;
+                        g.u_patch_status = patchstatus;
+                        g.u_satellite_last_update = recondate;
+                        g.u_bigfix_last_update = recondate;
+                        g.u_satellite_integrated = true;
+                        g.u_kernel_version = findSecondCell(servergr.short_description);
+                        g.update(); //updation
+
+                        gs.log('Oldest record with the same name updated: ' + g.sys_id);
+
+                    }
+                } else {
+                    g.initialize();
+                    g.u_type = "Satellite";
+                    g.u_sub_type = "IFSC";
+                    g.u_host_name = ogname;
+                    g.u_package_count = pkgcnt;
+                    g.u_cia_value = servergr.u_cia_value;
+                    g.u_class = servergr.sys_class_name.getDisplayValue();
+                    g.location = servergr.location;
+                    g.u_patch_status = patchstatus;
+                    g.u_satellite_last_update = recondate;
+                    g.u_bigfix_last_update = recondate;
+                    g.u_satellite_integrated = true;
+                    g.u_kernel_version = findSecondCell(servergr.short_description);
+                    g.insert(); //Insertion
+                    gs.log("Recon_satellite Create: new else mine" + ogname);
+                }
+            } else {
+                gs.log("Recon_satellite Not matched in CMDB: mine " + ogname);
+            }
+
+        });
+    }
+})(inputs, outputs);
